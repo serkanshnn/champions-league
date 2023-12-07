@@ -9,7 +9,6 @@ use App\Services\Team\TeamServiceInterface;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Arr;
 
-//@TODO: refactor
 class MatchService extends BaseService implements MatchServiceInterface
 {
     protected TeamServiceInterface $teamService;
@@ -61,6 +60,7 @@ class MatchService extends BaseService implements MatchServiceInterface
                 }
                 $schedule[$round][] = $matchup;
             }
+
             $this->rotate($teams);
         }
 
@@ -192,56 +192,25 @@ class MatchService extends BaseService implements MatchServiceInterface
     }
 
     /**
+     * Default percentage:
      * %25 win
      * %25 lose
      * %50 draw
      *
-     * 50 power + 3*2 = 56
-     * 50 power - 3*2 = 44
-     *
      * win bonus = 3
-     * lose bonus = 3
-     * draw bonus = 2
+     * lose bonus = -3
+     * draw bonus = 1
      * goal difference = 0.25
      *
-     * 50 + 3 * 2 + 9 * 0.25 = 58,25 ~ 56,9682151589
-     * 50 - 3 * 2 + 0 * 0.25 = 44 ~ 43,0317848411
+     * A team = 50 power + 3 * 2 + 9 * 0.25 = 58,25 ~ 56,9682151589
+     * B team = 50 power - 3 * 2 + 0 * 0.25 = 44 ~ 43,0317848411
      *
-     * 32,4137499999 daha güçlü
+     * 32,4137499999 more powerful
      * 32,4137499999/6 = 5,4022916666
      *
-     *  win + 3*5,4022916666 = 25 + 5,4022916666*3 = 41,2068749998
-     *  draw - 2*5,4022916666 = 50 - 5,4022916666*2 = 39,1954166668
-     *  lose - 1*5,4022916666 = 25 - 5,4022916666 = 19,5977083334
-     *
-     *
-     * %150 daha güçlü
-     * %27 daha güçlü
-     * 27/6 = 4,5
-     *
-     * win + 3*4,5 = 13,5 + 25 = 38,5
-     * draw - 2*4,5 = 9 - 50 = 41
-     * lose - 1*4,5 = 4,5 - 25 = 20,5
-     *
-     *
-     *
-     *  %25 win
-     *  %25 lose
-     *  %50 draw
-     *
-     *  50 power + 3*2 = 56
-     *  50 power - 3*2 = 44
-     *
-     *  %27 daha güçlü
-     *  27/6 = 4,5
-     *
-     *  win + 3*4,5 = 13,5 + 25 = 38,5
-     *  draw - 2*4,5 = 9 - 50 = 41
-     *  lose - 1*4,5 = 4,5 - 25 = 20,5
-     *
-     *
-     *
-     *
+     *  win percentage = default win percentage + 3*5,4022916666 = 25 + 5,4022916666*3 = 41,2068749998
+     *  draw percentage = default draw percentage - 2*5,4022916666 = 50 - 5,4022916666*2 = 39,1954166668
+     *  lose percentage = default lose percentage - 1*5,4022916666 = 25 - 5,4022916666 = 19,5977083334
      */
     public function playMatch($matchId, $week): array
     {
@@ -254,12 +223,13 @@ class MatchService extends BaseService implements MatchServiceInterface
         $firstTeamStats = $this->getStatsByTeam($match->homeTeam, $match->tournament_id, $week);
         $secondTeamStats = $this->getStatsByTeam($match->awayTeam, $match->tournament_id, $week);
 
+        $firstTeamPower = $this->calculateTeamPower($firstTeamStats, $defaultTeamPower);
+        $secondTeamPower = $this->calculateTeamPower($secondTeamStats, $defaultTeamPower);
 
-        $firstTeamPower = $defaultTeamPower + $firstTeamStats->win * 3 - $firstTeamStats->lose * 3 + $firstTeamStats->draw * 1 + $firstTeamStats->goal_difference * 0.5;
-        $secondTeamPower = $defaultTeamPower + $secondTeamStats->win * 3 - $secondTeamStats->lose * 3 + $secondTeamStats->draw * 1 + $secondTeamStats->goal_difference * 0.5;
+        $totalPower = $firstTeamPower + $secondTeamPower;
 
-        $normalizedFirstTeamPower = ($firstTeamPower * 100) / ($firstTeamPower + $secondTeamPower);
-        $normalizedSecondTeamPower = ($secondTeamPower * 100) / ($firstTeamPower + $secondTeamPower);
+        $normalizedFirstTeamPower = ($firstTeamPower * 100) / $totalPower;
+        $normalizedSecondTeamPower = ($secondTeamPower * 100) / $totalPower;
 
         if ($normalizedFirstTeamPower > $normalizedSecondTeamPower) {
             $powerDifference = (($normalizedFirstTeamPower - $normalizedSecondTeamPower) * 100 / $normalizedFirstTeamPower);
@@ -272,14 +242,15 @@ class MatchService extends BaseService implements MatchServiceInterface
         $winRate = $defaultWinRate + $rate * 3;
         $loseRate = $defaultLoseRate - $rate;
 
-        $homeGoal = 0;
-        $awayGoal = 0;
+        $homeGoal = $awayGoal = 0;
 
         for ($i = 0; $i < 15; $i++) {
-            $firstTeamRand = (float)rand() / (float)getrandmax();
-            $secondTeamRand = (float)rand() / (float)getrandmax();
-            if ($firstTeamRand < $winRate / 500) $homeGoal++;
-            if ($secondTeamRand < $loseRate / 500) $awayGoal++;
+            if ((float)rand() / (float)getrandmax() < $this->goalScoringProbability($winRate)) {
+                $homeGoal++;
+            }
+            if ((float)rand() / (float)getrandmax() < $this->goalScoringProbability($loseRate)) {
+                $awayGoal++;
+            }
         }
 
         $this->repository->update($matchId, [
@@ -294,6 +265,16 @@ class MatchService extends BaseService implements MatchServiceInterface
         ];
     }
 
+    private function goalScoringProbability($rate): float
+    {
+        return $rate / 500;
+    }
+
+    private function calculateTeamPower($stats, $defaultTeamPower): float
+    {
+        return $defaultTeamPower + $stats->win * 3 - $stats->lose * 3 + $stats->draw * 1 + $stats->goal_difference * 0.5;
+    }
+
     public function winEstimation(int $tournamentId, $week): array
     {
         $matches = $this->repository->allBy(['tournament_id' => $tournamentId]);
@@ -302,56 +283,22 @@ class MatchService extends BaseService implements MatchServiceInterface
         $teamIds = $teams->pluck('id')->toArray();
         $teamPoints = array_combine($teamIds, [0,0,0,0]);
 
-        $unplayedMatches = [];
-        $unplayedCount = 0;
-        foreach ($matches as $match) {
-            if ($match->is_match_played) {
-                if ($match->home_team_goals > $match->away_team_goals) {
-                    $teamPoints[$match->home_team_id] += 3;
-                }
+        list($unplayedCounts, $allMatches) = $this->calculatePlayedMatches($teamPoints, $matches);
 
-                if ($match->home_team_goals === $match->away_team_goals) {
-                    $teamPoints[$match->home_team_id] += 1;
-                    $teamPoints[$match->away_team_id] += 1;
-                }
-
-                if ($match->away_team_goals > $match->home_team_goals) {
-                    $teamPoints[$match->away_team_id] += 3;
-                }
-            } else {
-                $unplayedCount++;
-            }
-
-            $unplayedMatches[$match->week][] = $match->toArray();
-        }
-        $computedWeek = $unplayedCount > 0 && $week > 1 ? $week - 1: $week;
+        $computedWeek = $unplayedCounts[$week] > 0 && $week > 1 ? $week - 1: $week;
 
         $tempPoints = [];
+        $probabilities = ['win', 'draw', 'lose'];
         for ($i = $computedWeek; $i < 6; $i++) {
-            for ($j = $computedWeek; $j < 6; $j++) {
-                for ($k = 0; $k < 3; $k++) {
-                    for ($l = 0; $l < 3; $l++) {
-                        if (empty($tempPoints[$j][$k][$l])) {
-                            $tempPoints[$j][$k][$l] = $teamPoints;
+            for ($possibleWeek = $computedWeek; $possibleWeek < 6; $possibleWeek++) {
+                foreach ($probabilities as $firstMatchProbability) {
+                    foreach ($probabilities as $secondMatchProbability) {
+                        if (empty($tempPoints[$possibleWeek][$firstMatchProbability][$secondMatchProbability])) {
+                            $tempPoints[$possibleWeek][$firstMatchProbability][$secondMatchProbability] = $teamPoints;
                         }
 
-                        if ($k === 0) {
-                            $tempPoints[$j][$k][$l][$unplayedMatches[$j][0]['home_team_id']] += 3;
-                        } else if ($k === 1) {
-                            $tempPoints[$j][$k][$l][$unplayedMatches[$j][0]['home_team_id']] += 1;
-                            $tempPoints[$j][$k][$l][$unplayedMatches[$j][0]['away_team_id']] += 1;
-                        } else {
-                            $tempPoints[$j][$k][$l][$unplayedMatches[$j][0]['away_team_id']] += 3;
-                        }
-
-                        if ($l === 0) {
-                            $tempPoints[$j][$k][$l][$unplayedMatches[$j][1]['home_team_id']] += 3;
-                        } else if ($l === 1) {
-                            $tempPoints[$j][$k][$l][$unplayedMatches[$j][1]['home_team_id']] += 1;
-                            $tempPoints[$j][$k][$l][$unplayedMatches[$j][1]['away_team_id']] += 1;
-                        } else {
-                            $tempPoints[$j][$k][$l][$unplayedMatches[$j][1]['away_team_id']] += 3;
-                        }
+                        $this->updateTempPoints($tempPoints, $allMatches, $possibleWeek, $firstMatchProbability, $secondMatchProbability, 0);
+                        $this->updateTempPoints($tempPoints, $allMatches, $possibleWeek, $firstMatchProbability, $secondMatchProbability, 1);
                     }
                 }
             }
@@ -374,4 +321,42 @@ class MatchService extends BaseService implements MatchServiceInterface
             ];
         }, array_keys($teamWins), $teamWins);
     }
+    private function calculatePlayedMatches(&$teamPoints, $matches)
+    {
+        $allMatches = [];
+        $unplayedCounts = array_combine([1,2,3,4,5,6], [0,0,0,0,0,0]);
+
+        foreach ($matches as $match) {
+            if ($match->is_match_played) {
+                $homePoints = ($match->home_team_goals > $match->away_team_goals) ? 3 : (($match->home_team_goals === $match->away_team_goals) ? 1 : 0);
+                $awayPoints = ($match->away_team_goals > $match->home_team_goals) ? 3 : (($match->away_team_goals === $match->home_team_goals) ? 1 : 0);
+
+                $teamPoints[$match->home_team_id] += $homePoints;
+                $teamPoints[$match->away_team_id] += $awayPoints;
+            } else {
+                $unplayedCounts[$match->week] += 1;
+            }
+
+            $allMatches[$match->week][] = $match->toArray();
+        }
+
+        return [$unplayedCounts, $allMatches];
+    }
+
+    private function updateTempPoints(&$tempPoints, $allMatches, $possibleWeek, $firstMatchProbability, $secondMatchProbability, $index)
+    {
+        $checkerPossibility = $index ? $secondMatchProbability : $firstMatchProbability;
+        $homeTeamId = $allMatches[$possibleWeek][$index]['home_team_id'];
+        $awayTeamId = $allMatches[$possibleWeek][$index]['away_team_id'];
+
+        if ($checkerPossibility === 'win') {
+            $tempPoints[$possibleWeek][$firstMatchProbability][$secondMatchProbability][$homeTeamId] += 3;
+        } else if ($checkerPossibility === 'draw') {
+            $tempPoints[$possibleWeek][$firstMatchProbability][$secondMatchProbability][$homeTeamId] += 1;
+            $tempPoints[$possibleWeek][$firstMatchProbability][$secondMatchProbability][$awayTeamId] += 1;
+        } else {
+            $tempPoints[$possibleWeek][$firstMatchProbability][$secondMatchProbability][$awayTeamId] += 3;
+        }
+    }
+
 }
