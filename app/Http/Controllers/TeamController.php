@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Resources\TeamResource;
 use App\Services\Team\TeamServiceInterface;
 use Illuminate\Http\Request;
+use Inertia\Inertia;
 
 class TeamController extends Controller
 {
@@ -14,10 +15,14 @@ class TeamController extends Controller
         $this->service = $service;
     }
 
-    public function index(int $tournamentId)
+    public function index()
     {
-        $result = $this->service->allBy(['tournament_id' => $tournamentId]);
+        $result = $this->service->all();
 
-        return TeamResource::collection($result);
+        $teams = TeamResource::collection($result);
+
+        return Inertia::render('Teams', [
+            'teams' => $teams
+        ]);
     }
 }

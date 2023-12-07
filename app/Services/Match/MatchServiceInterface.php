@@ -8,9 +8,11 @@ use Illuminate\Support\Collection;
 
 interface MatchServiceInterface extends BaseServiceInterface
 {
-    public function generateFixture($teams, $tournamentId): array;
+    public function generateFixture($tournamentId): array;
     public function getMatchListGroupedByWeek($tournamentId): array;
-    public function getStatsByTeam($team, $tournamentId): Model;
-    public function playMatch(int $matchId): array;
-    public function winEstimation(array $teamIds, int $tournamentId): array;
+    public function getStatsByTeams($tournamentId, $week): array;
+    public function playMatch(int $matchId, $week): array;
+    public function playWeek(int $tournamentId, $week): bool;
+    public function playAll(int $tournamentId): bool;
+    public function winEstimation(int $tournamentId, $week): array;
 }

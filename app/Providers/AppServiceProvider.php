@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Http\Resources\MatchResource;
+use App\Http\Resources\TeamResource;
 use App\Repositories\Match\MatchRepository;
 use App\Repositories\Match\MatchRepositoryInterface;
 use App\Repositories\Team\TeamRepository;
@@ -39,6 +41,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        MatchResource::withoutWrapping();
+        TeamResource::withoutWrapping();
     }
 }

@@ -2,8 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Resources\MatchResource;
 use App\Services\Match\MatchServiceInterface;
-use Illuminate\Http\Request;
+use Inertia\Inertia;
 
 class MatchController extends Controller
 {
@@ -17,13 +18,37 @@ class MatchController extends Controller
     {
         $result = $this->service->getMatchListGroupedByWeek($tournamentId);
 
-        return response()->json(['data' => $result]);
+        return Inertia::render('MatchList', [
+            'weekMatches' => $result
+        ]);
     }
 
-    public function playMatch(int $matchId)
+    public function getMatchListByWeek(int $tournamentId, $week)
     {
-        $result = $this->service->playMatch($matchId);
+        $matches = $this->service->allBy(['tournament_id' => $tournamentId, 'week' => $week]);
 
-        return response()->json(['data' => $result]);
+        $stats = $this->service->getStatsByTeams($tournamentId, $week);
+
+        $estimations = $this->service->winEstimation($tournamentId, $week);
+
+        return Inertia::render('Week', [
+            'matches' => MatchResource::collection($matches),
+            'stats' => $stats,
+            'estimations' => $estimations
+        ]);
+    }
+
+    public function playWeek(int $tournamentId, $week)
+    {
+        $this->service->playWeek($tournamentId, $week);
+
+        return redirect()->route('tournaments.match.getMatchListByWeek', ['tournamentId' => $tournamentId, 'week' => $week]);
+    }
+
+    public function playAll(int $tournamentId)
+    {
+        $this->service->playAll($tournamentId);
+
+        return redirect()->route('matches.getMatchListGroupedByWeek', ['tournamentId' => $tournamentId]);
     }
 }

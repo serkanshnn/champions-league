@@ -3,23 +3,27 @@
 namespace App\Services\Match;
 
 use App\Http\Resources\MatchResource;
-use App\Models\BaseMatch;
-use App\Models\Team;
 use App\Repositories\Match\MatchRepositoryInterface;
 use App\Services\BaseService;
+use App\Services\Team\TeamServiceInterface;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Arr;
 
+//@TODO: refactor
 class MatchService extends BaseService implements MatchServiceInterface
 {
-    public function __construct(MatchRepositoryInterface $repository)
+    protected TeamServiceInterface $teamService;
+    public function __construct(MatchRepositoryInterface $repository, TeamServiceInterface $teamService)
     {
         parent::__construct($repository);
         $this->repository = $repository;
+        $this->teamService = $teamService;
     }
 
-    public function generateFixture($teams, $tournamentId): array
+    public function generateFixture($tournamentId): array
     {
+        $teams = $this->teamService->all();
+
         return $this->schedule($teams->toArray(), $tournamentId);
     }
 
@@ -98,9 +102,21 @@ class MatchService extends BaseService implements MatchServiceInterface
         return $weeks;
     }
 
-    public function getStatsByTeam($team, $tournamentId): Model
+    public function getStatsByTeams($tournamentId, $week): array
     {
-        $matches = $this->repository->allMatchesPlayedBy($team->id, $tournamentId);
+        $teams = $this->teamService->all();
+        $teamWithStats = [];
+
+        foreach ($teams as $team) {
+            $teamWithStats[] = $this->getStatsByTeam($team, $tournamentId, $week);
+        }
+
+        return $teamWithStats;
+    }
+
+    private function getStatsByTeam($team, $tournamentId, $week): Model
+    {
+        $matches = $this->repository->allMatchesPlayedBy($team->id, $tournamentId, $week);
 
         $played = count($matches);
         $win = 0;
@@ -141,80 +157,103 @@ class MatchService extends BaseService implements MatchServiceInterface
                 }
             }
         }
+        $temp = $team;
 
-        $team->played = $played;
-        $team->win = $win;
-        $team->draw = $draw;
-        $team->lose = $lose;
-        $team->goal_difference = $goalDifference;
-        $team->points = $points;
+        $temp->played = $played;
+        $temp->win = $win;
+        $temp->draw = $draw;
+        $temp->lose = $lose;
+        $temp->goal_difference = $goalDifference;
+        $temp->points = $points;
 
-        return $team;
+        return $temp;
     }
 
-    public function playMatch($matchId): array
+    public function playAll(int $tournamentId): bool
     {
-        /**
-         * %25 win
-         * %25 lose
-         * %50 draw
-         *
-         * 50 power + 3*2 = 56
-         * 50 power - 3*2 = 44
-         *
-         * win bonus = 3
-         * lose bonus = 3
-         * draw bonus = 2
-         * goal difference = 0.25
-         *
-         * 50 + 3 * 2 + 9 * 0.25 = 58,25 ~ 56,9682151589
-         * 50 - 3 * 2 + 0 * 0.25 = 44 ~ 43,0317848411
-         *
-         * 32,4137499999 daha güçlü
-         * 32,4137499999/6 = 5,4022916666
-         *
-         *  win + 3*5,4022916666 = 25 + 5,4022916666*3 = 41,2068749998
-         *  draw - 2*5,4022916666 = 50 - 5,4022916666*2 = 39,1954166668
-         *  lose - 1*5,4022916666 = 25 - 5,4022916666 = 19,5977083334
-         *
-         *
-         * %150 daha güçlü
-         * %27 daha güçlü
-         * 27/6 = 4,5
-         *
-         * win + 3*4,5 = 13,5 + 25 = 38,5
-         * draw - 2*4,5 = 9 - 50 = 41
-         * lose - 1*4,5 = 4,5 - 25 = 20,5
-         *
-         *
-         *
-         *  %25 win
-         *  %25 lose
-         *  %50 draw
-         *
-         *  50 power + 3*2 = 56
-         *  50 power - 3*2 = 44
-         *
-         *  %27 daha güçlü
-         *  27/6 = 4,5
-         *
-         *  win + 3*4,5 = 13,5 + 25 = 38,5
-         *  draw - 2*4,5 = 9 - 50 = 41
-         *  lose - 1*4,5 = 4,5 - 25 = 20,5
-         *
-         *
-         *
-         *
-         */
+        $matches = $this->repository->allBy(['tournament_id' => $tournamentId, 'is_match_played' => false]);
 
+        foreach ($matches as $match) {
+            $this->playMatch($match->id, $match->week);
+        }
+
+        return true;
+    }
+
+    public function playWeek(int $tournamentId, $week): bool
+    {
+        $matches = $this->repository->allBy(['tournament_id' => $tournamentId, 'week' => $week, 'is_match_played' => false]);
+
+        foreach ($matches as $match) {
+            $this->playMatch($match->id, $week);
+        }
+
+        return true;
+    }
+
+    /**
+     * %25 win
+     * %25 lose
+     * %50 draw
+     *
+     * 50 power + 3*2 = 56
+     * 50 power - 3*2 = 44
+     *
+     * win bonus = 3
+     * lose bonus = 3
+     * draw bonus = 2
+     * goal difference = 0.25
+     *
+     * 50 + 3 * 2 + 9 * 0.25 = 58,25 ~ 56,9682151589
+     * 50 - 3 * 2 + 0 * 0.25 = 44 ~ 43,0317848411
+     *
+     * 32,4137499999 daha güçlü
+     * 32,4137499999/6 = 5,4022916666
+     *
+     *  win + 3*5,4022916666 = 25 + 5,4022916666*3 = 41,2068749998
+     *  draw - 2*5,4022916666 = 50 - 5,4022916666*2 = 39,1954166668
+     *  lose - 1*5,4022916666 = 25 - 5,4022916666 = 19,5977083334
+     *
+     *
+     * %150 daha güçlü
+     * %27 daha güçlü
+     * 27/6 = 4,5
+     *
+     * win + 3*4,5 = 13,5 + 25 = 38,5
+     * draw - 2*4,5 = 9 - 50 = 41
+     * lose - 1*4,5 = 4,5 - 25 = 20,5
+     *
+     *
+     *
+     *  %25 win
+     *  %25 lose
+     *  %50 draw
+     *
+     *  50 power + 3*2 = 56
+     *  50 power - 3*2 = 44
+     *
+     *  %27 daha güçlü
+     *  27/6 = 4,5
+     *
+     *  win + 3*4,5 = 13,5 + 25 = 38,5
+     *  draw - 2*4,5 = 9 - 50 = 41
+     *  lose - 1*4,5 = 4,5 - 25 = 20,5
+     *
+     *
+     *
+     *
+     */
+    public function playMatch($matchId, $week): array
+    {
         $defaultTeamPower = 50;
         $defaultWinRate = 25;
         $defaultLoseRate = 25;
 
         $match = $this->repository->find($matchId);
 
-        $firstTeamStats = $this->getStatsByTeam($match->homeTeam, $match->tournament_id);
-        $secondTeamStats = $this->getStatsByTeam($match->awayTeam, $match->tournament_id);
+        $firstTeamStats = $this->getStatsByTeam($match->homeTeam, $match->tournament_id, $week);
+        $secondTeamStats = $this->getStatsByTeam($match->awayTeam, $match->tournament_id, $week);
+
 
         $firstTeamPower = $defaultTeamPower + $firstTeamStats->win * 3 - $firstTeamStats->lose * 3 + $firstTeamStats->draw * 1 + $firstTeamStats->goal_difference * 0.5;
         $secondTeamPower = $defaultTeamPower + $secondTeamStats->win * 3 - $secondTeamStats->lose * 3 + $secondTeamStats->draw * 1 + $secondTeamStats->goal_difference * 0.5;
@@ -255,16 +294,19 @@ class MatchService extends BaseService implements MatchServiceInterface
         ];
     }
 
-    public function winEstimation(array $teamIds, int $tournamentId): array
+    public function winEstimation(int $tournamentId, $week): array
     {
         $matches = $this->repository->allBy(['tournament_id' => $tournamentId]);
+        $teams = $this->teamService->all();
 
+        $teamIds = $teams->pluck('id')->toArray();
         $teamPoints = array_combine($teamIds, [0,0,0,0]);
 
         $unplayedMatches = [];
+        $unplayedCount = 0;
         foreach ($matches as $match) {
             if ($match->is_match_played) {
-                if ($match->home_team_goals > $matches->away_team_goals) {
+                if ($match->home_team_goals > $match->away_team_goals) {
                     $teamPoints[$match->home_team_id] += 3;
                 }
 
@@ -277,15 +319,16 @@ class MatchService extends BaseService implements MatchServiceInterface
                     $teamPoints[$match->away_team_id] += 3;
                 }
             } else {
-                $unplayedMatches[$match->week][] = $match->toArray();
+                $unplayedCount++;
             }
+
+            $unplayedMatches[$match->week][] = $match->toArray();
         }
+        $computedWeek = $unplayedCount > 0 && $week > 1 ? $week - 1: $week;
 
-
-        $week = min(array_keys($unplayedMatches));
         $tempPoints = [];
-        for ($i = $week; $i <= 6; $i++) {
-            for ($j = $week; $j <= 6; $j++) {
+        for ($i = $computedWeek; $i < 6; $i++) {
+            for ($j = $computedWeek; $j < 6; $j++) {
                 for ($k = 0; $k < 3; $k++) {
                     for ($l = 0; $l < 3; $l++) {
                         if (empty($tempPoints[$j][$k][$l])) {
@@ -315,7 +358,7 @@ class MatchService extends BaseService implements MatchServiceInterface
         }
 
         $teamWins = array_combine($teamIds, [0,0,0,0]);
-        foreach (Arr::flatten($tempPoints, 2) as $item)
+        foreach ($tempPoints ? Arr::flatten($tempPoints, 2): [$teamPoints] as $item)
         {
             foreach (array_keys($item, max($item)) as $key) {
                 $teamWins[$key] += 1;
@@ -324,8 +367,11 @@ class MatchService extends BaseService implements MatchServiceInterface
 
         $totalCount = array_sum($teamWins);
 
-        return array_map(function ($team) use ($totalCount) {
-            return $team*100/$totalCount;
-        }, $teamWins);
+        return array_map(function ($id, $team) use ($totalCount, $teams) {
+            return [
+                'name' => $teams->where('id', $id)->first()->name,
+                'percent' => $totalCount ? $team*100 / $totalCount: 0
+            ];
+        }, array_keys($teamWins), $teamWins);
     }
 }

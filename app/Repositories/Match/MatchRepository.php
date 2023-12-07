@@ -15,12 +15,13 @@ class MatchRepository extends BaseRepository implements MatchRepositoryInterface
         parent::__construct(BaseMatch::class);
     }
 
-    public function allMatchesPlayedBy($teamId, $tournamentId): Collection
+    public function allMatchesPlayedBy($teamId, $tournamentId, $week): Collection
     {
         return $this->model::where(function ($query) use ($teamId) {
             $query->where('home_team_id', $teamId)
                 ->orWhere('away_team_id', $teamId);
         })->where('tournament_id', $tournamentId)
+            ->where('week', '<=', $week)
             ->where('is_match_played', true)
             ->get();
     }

@@ -19,6 +19,7 @@ class TournamentService extends BaseService implements TournamentServiceInterfac
         parent::__construct($repository);
         $this->repository = $repository;
         $this->matchService = $matchService;
+        $this->teamService = $teamService;
     }
 
     public function create($data): Model
@@ -27,8 +28,7 @@ class TournamentService extends BaseService implements TournamentServiceInterfac
         $result = $this->repository->create($data);
 
         // Generate Fixture
-        $teams = $this->teamService->all();
-        $this->matchService->generateFixture($teams, $result->id);
+        $this->matchService->generateFixture($result->id);
 
         return $result;
     }
