@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\Route;
 |
 */
 
-Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
-    return $request->user();
-});
+Route::post('tournaments', [\App\Http\Controllers\TournamentController::class, 'store'])->name('tournaments.store');
+Route::get('tournaments/{tournamentId}/matches', [\App\Http\Controllers\MatchController::class, 'getMatchListGroupedByWeek'])->name('matches.getMatchListGroupedByWeek');
+Route::get('tournaments/{tournamentId}/stats', [\App\Http\Controllers\TeamController::class, 'index'])->name('teams.stats');
+Route::post('match/{week}/play', [\App\Http\Controllers\MatchController::class, 'playMatch'])->name('match.play');
